@@ -99,16 +99,16 @@ public class ExperimentLogger : MonoBehaviour
         lastSnapshotTime = 0f;
         isLogging = true;
 
-        // 出力パスを設定（プロジェクトルートにExperimentDataフォルダ）
+        // 出力先: Assets/ExperimentData（UnityのProjectウィンドウで見える）
         string timestamp = System.DateTime.Now.ToString("yyyyMMdd_HHmmss");
-        string folderPath = Path.Combine(Application.dataPath, "..", "ExperimentData");
+        string folderPath = Path.Combine(Application.dataPath, "ExperimentData");
         if (!Directory.Exists(folderPath))
         {
             Directory.CreateDirectory(folderPath);
         }
         outputPath = Path.Combine(folderPath, $"{experimentName}_{timestamp}");
 
-        Debug.Log($"<color=green>Experiment started: {outputPath}</color>");
+        Debug.Log($"<color=green>Experiment started. Results will be saved to: {Path.GetFullPath(outputPath)}</color>");
     }
 
     /// <summary>
@@ -219,27 +219,36 @@ public class ExperimentLogger : MonoBehaviour
         }
     }
 
+    private bool isSaving = false;
+
     public void SaveAllData()
     {
-        if (!isLogging) return;
+        if (!isLogging || isSaving) return;
+        isSaving = true;
 
-        // 最後のスナップショットを取る
-        TakeSnapshot();
+        try
+        {
+            // 最後のスナップショット（再生停止中はスキップしてもよい）
+            try { TakeSnapshot(); } catch (System.Exception e) { Debug.LogWarning("Snapshot skip: " + e.Message); }
 
-        // 実験サマリーを保存
-        SaveSummary();
+            SaveSummary();
+            SaveCaptureEvents();
+            SaveSnapshots();
+            SaveParameters();
 
-        // 捕食イベントCSVを保存
-        SaveCaptureEvents();
-
-        // スナップショットCSVを保存
-        SaveSnapshots();
-
-        // パラメータを保存
-        SaveParameters();
-
-        isLogging = false;
-        Debug.Log($"<color=green>Experiment data saved to: {outputPath}</color>");
+            string fullPath = Path.GetFullPath(outputPath);
+            Debug.Log($"<color=green>Experiment data saved. Folder: {Path.GetDirectoryName(fullPath)}</color>");
+            Debug.Log($"<color=green>Files: *_summary.txt, *_captures.csv, *_snapshots.csv, *_parameters.csv</color>");
+        }
+        catch (System.Exception e)
+        {
+            Debug.LogError($"Experiment save failed: {e.Message}\n{e.StackTrace}");
+        }
+        finally
+        {
+            isLogging = false;
+            isSaving = false;
+        }
     }
 
     void SaveSummary()
@@ -286,33 +295,54 @@ public class ExperimentLogger : MonoBehaviour
     void SaveParameters()
     {
         StringBuilder sb = new StringBuilder();
-        sb.AppendLine("parameter,value");
+        sb.AppendLine("category,parameter,value,description");
+
+        // 実験メタデータ
+        sb.AppendLine($"experiment,name,{experimentName},実験名");
+        sb.AppendLine($"experiment,timestamp,{System.DateTime.Now:yyyy-MM-dd HH:mm:ss},実験日時");
+        sb.AppendLine($"experiment,duration_sec,{Time.time - experimentStartTime:F2},実験時間（秒）");
+
+        // 被捕食者（Boid）パラメータ
+        Boid[] boids = FindObjectsOfType<Boid>();
+        int initialBoidCount = boids.Length + totalKills;
+        sb.AppendLine($"boid,initial_count,{initialBoidCount},初期個体数");
+        sb.AppendLine($"boid,final_count,{boids.Length},最終個体数");
 
         if (boidSettings != null)
         {
-            sb.AppendLine($"boid_minSpeed,{boidSettings.minSpeed}");
-            sb.AppendLine($"boid_maxSpeed,{boidSettings.maxSpeed}");
-            sb.AppendLine($"boid_perceptionRadius,{boidSettings.perceptionRadius}");
-            sb.AppendLine($"boid_avoidanceRadius,{boidSettings.avoidanceRadius}");
-            sb.AppendLine($"boid_alignWeight,{boidSettings.alignWeight}");
-            sb.AppendLine($"boid_cohesionWeight,{boidSettings.cohesionWeight}");
-            sb.AppendLine($"boid_seperateWeight,{boidSettings.seperateWeight}");
+            sb.AppendLine($"boid,minSpeed,{boidSettings.minSpeed},最小速度");
+            sb.AppendLine($"boid,maxSpeed,{boidSettings.maxSpeed},最大速度");
+            sb.AppendLine($"boid,perceptionRadius,{boidSettings.perceptionRadius},知覚半径");
+            sb.AppendLine($"boid,avoidanceRadius,{boidSettings.avoidanceRadius},回避半径");
+            sb.AppendLine($"boid,alignWeight,{boidSettings.alignWeight},整列重み");
+            sb.AppendLine($"boid,cohesionWeight,{boidSettings.cohesionWeight},結合重み");
+            sb.AppendLine($"boid,seperateWeight,{boidSettings.seperateWeight},分離重み");
+            sb.AppendLine($"boid,maxSteerForce,{boidSettings.maxSteerForce},最大操舵力");
         }
 
         // 捕食者パラメータ
         ConfusionPredator predator = FindObjectOfType<ConfusionPredator>();
         if (predator != null)
         {
-            sb.AppendLine($"predator_speed,{predator.speed}");
-            sb.AppendLine($"predator_viewRadius,{predator.viewRadius}");
-            sb.AppendLine($"predator_viewAngle,{predator.viewAngle}");
-            sb.AppendLine($"predator_blindAngle,{predator.blindAngle}");
-            sb.AppendLine($"predator_confusionStrength,{predator.confusionStrength}");
+            sb.AppendLine($"predator,speed,{predator.speed},移動速度");
+            sb.AppendLine($"predator,viewRadius,{predator.viewRadius},視野半径");
+            sb.AppendLine($"predator,viewAngle,{predator.viewAngle},視野角（度）");
+            sb.AppendLine($"predator,blindAngle,{predator.blindAngle},死角（度）");
+            sb.AppendLine($"predator,captureRadius,{predator.captureRadius},捕食判定距離");
+            sb.AppendLine($"predator,baseTurnSpeed,{predator.baseTurnSpeed},基本旋回速度");
+            sb.AppendLine($"predator,confusionStrength,{predator.confusionStrength},混乱強度");
+            sb.AppendLine($"predator,maxConfusionCount,{predator.maxConfusionCount},最大混乱個体数");
+            sb.AppendLine($"predator,maxAngleDeviation,{predator.maxAngleDeviation},最大角度ずれ（度）");
+            sb.AppendLine($"predator,targetSwitchCooldown,{predator.targetSwitchCooldown},ターゲット切替クールダウン（秒）");
+            sb.AppendLine($"predator,maxChaseDistance,{predator.maxChaseDistance},最大追跡距離");
         }
 
-        // 初期魚数
-        Boid[] boids = FindObjectsOfType<Boid>();
-        sb.AppendLine($"initial_boid_count,{boids.Length + totalKills}");
+        // 実験結果サマリー
+        sb.AppendLine($"result,total_kills,{totalKills},総捕食数");
+        sb.AppendLine($"result,first_kill_time,{(firstKillTime >= 0 ? firstKillTime.ToString("F2") : "N/A")},最初の捕食までの時間（秒）");
+        float duration = Time.time - experimentStartTime;
+        float captureRate = duration > 0 ? (totalKills / duration) * 60f : 0f;
+        sb.AppendLine($"result,capture_rate_per_min,{captureRate:F3},時間当たり捕食数（/分）");
 
         File.WriteAllText(outputPath + "_parameters.csv", sb.ToString());
     }

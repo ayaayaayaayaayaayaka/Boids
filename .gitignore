@@ -66,8 +66,4 @@ crashlytics-build.properties
 UserSettings/
 
 # 実験の出力ファイル（実行のたびに増える）
-ExperimentData/*_summary.txt
-ExperimentData/*_captures.csv
-ExperimentData/*_snapshots.csv
-ExperimentData/*_parameters.csv
-
+ExperimentData/
