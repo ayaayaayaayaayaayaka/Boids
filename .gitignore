@@ -67,3 +67,6 @@ UserSettings/
 
 # 実験の出力ファイル（実行のたびに増える）
 Assets/ExperimentData/*
+ExperimentData/generate_word_report.py
+ExperimentData/~$総合レポート.docx
+ExperimentData/総合レポート.docx
