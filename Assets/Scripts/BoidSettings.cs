@@ -17,7 +17,7 @@ public class BoidSettings : ScriptableObject {
     public float maxSteerForce = 3;
 
     public float alignWeight = 1;
-    public float cohesionWeight = 5;
+    public float cohesionWeight = 15;
     public float seperateWeight = 1;
 
     public float targetWeight = 1;

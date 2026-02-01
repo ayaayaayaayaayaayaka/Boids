@@ -2900,6 +2900,7 @@ MonoBehaviour:
   m_EditorClassIdentifier: 
   experimentName: experiment
   autoStartLogging: 1
+  experimentCondition: B2
   boidSettings: {fileID: 0}
 --- !u!4 &1960724755
 Transform:

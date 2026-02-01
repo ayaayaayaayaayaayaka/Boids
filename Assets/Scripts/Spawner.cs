@@ -13,7 +13,7 @@ public class Spawner : MonoBehaviour {
 
     public Boid prefab;
     public float spawnRadius = 10;
-    public int spawnCount = 10;
+    public int spawnCount = 100;
     public Color colour;
     public GizmoType showSpawnRegion;
 

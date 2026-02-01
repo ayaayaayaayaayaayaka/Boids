@@ -20,7 +20,7 @@ public class ConfusionPredator : MonoBehaviour {
     [Header("Confusion Effect（論文 Fig.2 準拠）")]
     [Tooltip("混乱の強さ：0=混乱しない、1=視界内の魚が多いと大きく混乱")]
     [Range(0f, 1f)]
-    public float confusionStrength = 0.5f;
+    public float confusionStrength = 0f;
     [Tooltip("この数以上の魚が視界にいると最大混乱")]
     public int maxConfusionCount = 10;
     [Tooltip("混乱時の追跡角度ずれ最大値（度）")]

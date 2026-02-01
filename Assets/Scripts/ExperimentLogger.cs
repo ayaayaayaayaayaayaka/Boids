@@ -2,20 +2,39 @@ using UnityEngine;
 using System.IO;
 using System.Text;
 using System.Collections.Generic;
+#if UNITY_EDITOR
+using UnityEditor;
+#endif
 
 /// <summary>
 /// 実験データをCSVファイルに出力するクラス
-/// シーンに1つ配置して使用。
-/// CSV保存タイミング：あなたが「再生停止」ボタンを押したとき（エディタ）、
-/// またはビルド版でアプリを閉じたときに自動で保存されます。
+/// シーンに1つ配置。Inspectorで条件を選び、再生停止で summary / captures / snapshots が保存される。
 /// </summary>
 public class ExperimentLogger : MonoBehaviour
 {
     public static ExperimentLogger Instance { get; private set; }
 
+    /// <summary>比較実験の条件（Inspectorで選択）</summary>
+    public enum ExperimentCondition
+    {
+        A1, A2, A3,  // 個体数の影響
+        B1, B2, B3,  // 結合力の影響
+        C1, C2, C3   // 混乱強度の影響
+    }
+
     [Header("実験設定")]
     public string experimentName = "experiment";
     public bool autoStartLogging = true;
+
+    [Header("自動停止設定")]
+    [Tooltip("この数だけ捕食されたら自動的に実験を終了する（0=無効）")]
+    public int autoStopAtKills = 12;
+    [Tooltip("自動停止が有効かどうか")]
+    public bool enableAutoStop = true;
+
+    [Header("比較実験の条件（再生前に選択）")]
+    [Tooltip("A1=20匹, A2=50匹, A3=100匹 / B1=疎, B2=標準, B3=密 / C1=混乱0, C2=0.5, C3=1.0")]
+    public ExperimentCondition experimentCondition = ExperimentCondition.A1;
 
     [Header("参照")]
     public BoidSettings boidSettings;
@@ -27,10 +46,12 @@ public class ExperimentLogger : MonoBehaviour
     private List<CaptureEvent> captureEvents = new List<CaptureEvent>();
     private List<PeriodicSnapshot> snapshots = new List<PeriodicSnapshot>();
     private float lastSnapshotTime = 0f;
-    private float snapshotInterval = 5f; // 5秒ごとにスナップショット
+    private float snapshotInterval = 5f;
 
     private bool isLogging = false;
     private string outputPath;
+    private int initialBoidCountRecorded = 0;
+    private int configuredSpawnTotal = 0;
 
     // 捕食イベントのデータ構造
     [System.Serializable]
@@ -99,16 +120,23 @@ public class ExperimentLogger : MonoBehaviour
         lastSnapshotTime = 0f;
         isLogging = true;
 
-        // 出力先: Assets/ExperimentData（UnityのProjectウィンドウで見える）
+        // 出力先: Assets/ExperimentData（条件名＋タイムスタンプでファイル名）
         string timestamp = System.DateTime.Now.ToString("yyyyMMdd_HHmmss");
         string folderPath = Path.Combine(Application.dataPath, "ExperimentData");
         if (!Directory.Exists(folderPath))
         {
             Directory.CreateDirectory(folderPath);
         }
-        outputPath = Path.Combine(folderPath, $"{experimentName}_{timestamp}");
+        string conditionStr = experimentCondition.ToString();
+        outputPath = Path.Combine(folderPath, $"{experimentName}_{conditionStr}_{timestamp}");
 
-        Debug.Log($"<color=green>Experiment started. Results will be saved to: {Path.GetFullPath(outputPath)}</color>");
+        // 実験開始直後の個体数とSpawner設定を記録
+        initialBoidCountRecorded = FindObjectsOfType<Boid>().Length;
+        configuredSpawnTotal = 0;
+        Spawner[] spawners = FindObjectsOfType<Spawner>();
+        foreach (Spawner s in spawners) configuredSpawnTotal += s.spawnCount;
+
+        Debug.Log($"<color=green>Experiment [{conditionStr}] started. Initial boids: {initialBoidCountRecorded}. Results → {Path.GetFullPath(outputPath)}</color>");
     }
 
     /// <summary>
@@ -139,6 +167,31 @@ public class ExperimentLogger : MonoBehaviour
         captureEvents.Add(evt);
 
         Debug.Log($"<color=yellow>Kill #{totalKills} | Time: {elapsed:F2}s | Rate: {evt.captureRate:F2}/min | InView: {boidsInView}</color>");
+
+        // 自動停止：指定数に達したら実験終了
+        if (enableAutoStop && autoStopAtKills > 0 && totalKills >= autoStopAtKills)
+        {
+            Debug.Log($"<color=cyan>=== 自動停止: {autoStopAtKills}匹捕食達成 ===</color>");
+            StopExperiment();
+        }
+    }
+
+    /// <summary>
+    /// 実験を終了し、データを保存して再生を停止する
+    /// </summary>
+    public void StopExperiment()
+    {
+        if (!isLogging) return;
+
+        SaveAllData();
+
+#if UNITY_EDITOR
+        // エディタの場合は再生を停止
+        EditorApplication.isPlaying = false;
+#else
+        // ビルド版の場合はアプリを終了
+        Application.Quit();
+#endif
     }
 
     void TakeSnapshot()
@@ -234,11 +287,10 @@ public class ExperimentLogger : MonoBehaviour
             SaveSummary();
             SaveCaptureEvents();
             SaveSnapshots();
-            SaveParameters();
 
             string fullPath = Path.GetFullPath(outputPath);
-            Debug.Log($"<color=green>Experiment data saved. Folder: {Path.GetDirectoryName(fullPath)}</color>");
-            Debug.Log($"<color=green>Files: *_summary.txt, *_captures.csv, *_snapshots.csv, *_parameters.csv</color>");
+            Debug.Log($"<color=green>Experiment [{experimentCondition}] saved. Folder: {Path.GetDirectoryName(fullPath)}</color>");
+            Debug.Log($"<color=green>Files: *_summary.txt, *_captures.csv, *_snapshots.csv</color>");
         }
         catch (System.Exception e)
         {
@@ -254,14 +306,23 @@ public class ExperimentLogger : MonoBehaviour
     void SaveSummary()
     {
         float totalTime = Time.time - experimentStartTime;
+        float captureRate = totalTime > 0 ? (totalKills / totalTime) * 60f : 0f;
+
+        float cohesionWeight = boidSettings != null ? boidSettings.cohesionWeight : 0f;
+        float confusionStrength = 0f;
+        ConfusionPredator predator = FindObjectOfType<ConfusionPredator>();
+        if (predator != null) confusionStrength = predator.confusionStrength;
+
         StringBuilder sb = new StringBuilder();
         sb.AppendLine("=== Experiment Summary ===");
-        sb.AppendLine($"Experiment Name: {experimentName}");
+        sb.AppendLine($"Condition: {experimentCondition}");
+        sb.AppendLine($"Initial Boid Count: {initialBoidCountRecorded}");
+        sb.AppendLine($"Cohesion Weight: {cohesionWeight}");
+        sb.AppendLine($"Confusion Strength: {confusionStrength}");
         sb.AppendLine($"Total Duration: {totalTime:F2} seconds");
         sb.AppendLine($"Total Kills: {totalKills}");
         sb.AppendLine($"First Kill Time: {(firstKillTime >= 0 ? firstKillTime.ToString("F2") + "s" : "N/A")}");
-        sb.AppendLine($"Average Capture Rate: {(totalTime > 0 ? (totalKills / totalTime) * 60f : 0f):F2} per minute");
-        sb.AppendLine($"Initial Boid Count: {(snapshots.Count > 0 ? snapshots[0].totalBoids + totalKills : 0)}");
+        sb.AppendLine($"Capture Rate: {captureRate:F2} per minute");
 
         File.WriteAllText(outputPath + "_summary.txt", sb.ToString());
     }
@@ -269,11 +330,12 @@ public class ExperimentLogger : MonoBehaviour
     void SaveCaptureEvents()
     {
         StringBuilder sb = new StringBuilder();
-        sb.AppendLine("time_sec,kill_number,capture_rate_per_min,boids_in_view,remaining_boids");
+        sb.AppendLine("condition,time_sec,kill_number,capture_rate_per_min,boids_in_view,remaining_boids");
 
+        string conditionStr = experimentCondition.ToString();
         foreach (var evt in captureEvents)
         {
-            sb.AppendLine($"{evt.time:F2},{evt.killNumber},{evt.captureRate:F3},{evt.boidsInPredatorView},{evt.remainingBoids}");
+            sb.AppendLine($"{conditionStr},{evt.time:F2},{evt.killNumber},{evt.captureRate:F3},{evt.boidsInPredatorView},{evt.remainingBoids}");
         }
 
         File.WriteAllText(outputPath + "_captures.csv", sb.ToString());
@@ -282,68 +344,14 @@ public class ExperimentLogger : MonoBehaviour
     void SaveSnapshots()
     {
         StringBuilder sb = new StringBuilder();
-        sb.AppendLine("time_sec,total_boids,total_kills,capture_rate_per_min,avg_neighbor_dist,polarization");
+        sb.AppendLine("condition,time_sec,total_boids,total_kills,capture_rate_per_min,avg_neighbor_dist,polarization");
 
+        string conditionStr = experimentCondition.ToString();
         foreach (var snap in snapshots)
         {
-            sb.AppendLine($"{snap.time:F2},{snap.totalBoids},{snap.totalKills},{snap.captureRatePerMinute:F3},{snap.avgFlockDensity:F3},{snap.flockPolarization:F3}");
+            sb.AppendLine($"{conditionStr},{snap.time:F2},{snap.totalBoids},{snap.totalKills},{snap.captureRatePerMinute:F3},{snap.avgFlockDensity:F3},{snap.flockPolarization:F3}");
         }
 
         File.WriteAllText(outputPath + "_snapshots.csv", sb.ToString());
-    }
-
-    void SaveParameters()
-    {
-        StringBuilder sb = new StringBuilder();
-        sb.AppendLine("category,parameter,value,description");
-
-        // 実験メタデータ
-        sb.AppendLine($"experiment,name,{experimentName},実験名");
-        sb.AppendLine($"experiment,timestamp,{System.DateTime.Now:yyyy-MM-dd HH:mm:ss},実験日時");
-        sb.AppendLine($"experiment,duration_sec,{Time.time - experimentStartTime:F2},実験時間（秒）");
-
-        // 被捕食者（Boid）パラメータ
-        Boid[] boids = FindObjectsOfType<Boid>();
-        int initialBoidCount = boids.Length + totalKills;
-        sb.AppendLine($"boid,initial_count,{initialBoidCount},初期個体数");
-        sb.AppendLine($"boid,final_count,{boids.Length},最終個体数");
-
-        if (boidSettings != null)
-        {
-            sb.AppendLine($"boid,minSpeed,{boidSettings.minSpeed},最小速度");
-            sb.AppendLine($"boid,maxSpeed,{boidSettings.maxSpeed},最大速度");
-            sb.AppendLine($"boid,perceptionRadius,{boidSettings.perceptionRadius},知覚半径");
-            sb.AppendLine($"boid,avoidanceRadius,{boidSettings.avoidanceRadius},回避半径");
-            sb.AppendLine($"boid,alignWeight,{boidSettings.alignWeight},整列重み");
-            sb.AppendLine($"boid,cohesionWeight,{boidSettings.cohesionWeight},結合重み");
-            sb.AppendLine($"boid,seperateWeight,{boidSettings.seperateWeight},分離重み");
-            sb.AppendLine($"boid,maxSteerForce,{boidSettings.maxSteerForce},最大操舵力");
-        }
-
-        // 捕食者パラメータ
-        ConfusionPredator predator = FindObjectOfType<ConfusionPredator>();
-        if (predator != null)
-        {
-            sb.AppendLine($"predator,speed,{predator.speed},移動速度");
-            sb.AppendLine($"predator,viewRadius,{predator.viewRadius},視野半径");
-            sb.AppendLine($"predator,viewAngle,{predator.viewAngle},視野角（度）");
-            sb.AppendLine($"predator,blindAngle,{predator.blindAngle},死角（度）");
-            sb.AppendLine($"predator,captureRadius,{predator.captureRadius},捕食判定距離");
-            sb.AppendLine($"predator,baseTurnSpeed,{predator.baseTurnSpeed},基本旋回速度");
-            sb.AppendLine($"predator,confusionStrength,{predator.confusionStrength},混乱強度");
-            sb.AppendLine($"predator,maxConfusionCount,{predator.maxConfusionCount},最大混乱個体数");
-            sb.AppendLine($"predator,maxAngleDeviation,{predator.maxAngleDeviation},最大角度ずれ（度）");
-            sb.AppendLine($"predator,targetSwitchCooldown,{predator.targetSwitchCooldown},ターゲット切替クールダウン（秒）");
-            sb.AppendLine($"predator,maxChaseDistance,{predator.maxChaseDistance},最大追跡距離");
-        }
-
-        // 実験結果サマリー
-        sb.AppendLine($"result,total_kills,{totalKills},総捕食数");
-        sb.AppendLine($"result,first_kill_time,{(firstKillTime >= 0 ? firstKillTime.ToString("F2") : "N/A")},最初の捕食までの時間（秒）");
-        float duration = Time.time - experimentStartTime;
-        float captureRate = duration > 0 ? (totalKills / duration) * 60f : 0f;
-        sb.AppendLine($"result,capture_rate_per_min,{captureRate:F3},時間当たり捕食数（/分）");
-
-        File.WriteAllText(outputPath + "_parameters.csv", sb.ToString());
     }
 }
