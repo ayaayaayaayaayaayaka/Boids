@@ -1,4 +1,9 @@
-﻿using System.Collections;
+﻿/*
+Copyright (c) 2019 Sebastian Lague
+Released under the MIT license
+https://github.com/SebLague/Boids/blob/master/LICENSE
+*/
+using System.Collections;
 using System.Collections.Generic;
 using UnityEngine;
 
@@ -7,7 +12,7 @@ public static class BoidHelper {
     const int numViewDirections = 300;
     public static readonly Vector3[] directions;
 
-    static BoidHelper () {
+    static BoidHelper () {                                     //障害物がない方向のリストを作る
         directions = new Vector3[BoidHelper.numViewDirections];
 
         float goldenRatio = (1 + Mathf.Sqrt (5)) / 2;

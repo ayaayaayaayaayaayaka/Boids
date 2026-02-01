@@ -1,4 +1,9 @@
-﻿using System.Collections;
+﻿/*
+Copyright (c) 2019 Sebastian Lague
+Released under the MIT license
+https://github.com/SebLague/Boids/blob/master/LICENSE
+*/
+using System.Collections;
 using System.Collections.Generic;
 using UnityEngine;
 
@@ -12,7 +17,7 @@ public class BoidSettings : ScriptableObject {
     public float maxSteerForce = 3;
 
     public float alignWeight = 1;
-    public float cohesionWeight = 1;
+    public float cohesionWeight = 5;
     public float seperateWeight = 1;
 
     public float targetWeight = 1;

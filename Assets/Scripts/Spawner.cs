@@ -1,4 +1,9 @@
-﻿using System.Collections;
+﻿/*
+Copyright (c) 2019 Sebastian Lague
+Released under the MIT license
+https://github.com/SebLague/Boids/blob/master/LICENSE
+*/
+using System.Collections;
 using System.Collections.Generic;
 using UnityEngine;
 
@@ -13,13 +18,11 @@ public class Spawner : MonoBehaviour {
     public GizmoType showSpawnRegion;
 
     void Awake () {
-        for (int i = 0; i < spawnCount; i++) {
+        for (int i = 0; i < spawnCount; i++) {                   //位置と向きをランダムに初期化
             Vector3 pos = transform.position + Random.insideUnitSphere * spawnRadius;
             Boid boid = Instantiate (prefab);
             boid.transform.position = pos;
             boid.transform.forward = Random.insideUnitSphere;
-
-            boid.SetColour (colour);
         }
     }
 
